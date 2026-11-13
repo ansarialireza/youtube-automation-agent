@@ -147,8 +147,8 @@ class ProductionReadinessService {
   async probeImage(tempDir, includePaidMedia) {
     if (this.probes.image) return this.probes.image({ tempDir, includePaidMedia });
     const generator = new AIVideoGenerator(this.credentialManager.credentials || {});
-    if (!generator.openai && !generator.gemini) {
-      return { status: 'warning', message: 'No AI image provider is configured; gradient visuals will be used.', remediation: 'Configure OpenAI or Gemini image access if generated visuals are required.' };
+    if (!generator.openai && !generator.gemini && !(generator.cloudflareApiToken && generator.cloudflareAccountId)) {
+      return { status: 'warning', message: 'No AI image provider is configured; gradient visuals will be used.', remediation: 'Configure Cloudflare, Gemini, or OpenAI image access if generated visuals are required.' };
     }
     if (!includePaidMedia) {
       return { status: 'skipped', message: 'Provider is configured; the paid live image probe was not requested.', remediation: 'Enable “Include paid image probe” on the next readiness run to verify image generation.' };
