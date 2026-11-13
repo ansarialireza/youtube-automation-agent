@@ -159,6 +159,21 @@ class CredentialManager {
     return oauth2Client;
   }
 
+  hasNotebookScope() {
+    const granted = String(this.tokens?.youtube?.scope || this.tokens?.scope || '');
+    return granted.split(/\s+/).includes('https://www.googleapis.com/auth/notebook');
+  }
+
+  async getNotebookLMAccessToken() {
+    const auth = this.getYouTubeAuth();
+    const tokenResponse = await auth.getAccessToken();
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+    if (!token) {
+      throw new Error('Failed to obtain Google OAuth access token');
+    }
+    return token;
+  }
+
   getNotebookLMAuthUrl() {
     if (!this.credentials.youtube) {
       throw new Error('Google OAuth credentials not configured in credentials.json');

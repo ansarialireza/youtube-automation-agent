@@ -3981,6 +3981,75 @@ class SystemTest {
       throw new Error('Resilient agent failed to cleanly fallback to AI text synthesis');
     }
 
+    // 6. OAuth integration & CredentialManager wiring suite
+    // Test: Missing credentials -> isConfigured() = false
+    const unconfiguredProvider = new NotebookLMClientProvider({}, {
+      credentialManager: { hasNotebookScope: () => false, tokens: {} }
+    });
+    if (unconfiguredProvider.isConfigured()) {
+      throw new Error('Provider should report unconfigured when missing notebook scope');
+    }
+
+    // Test: Valid OAuth credentials with scope -> isConfigured() = true
+    let refreshCount = 0;
+    const mockOAuthClient = {
+      getAccessToken: async () => {
+        refreshCount++;
+        return { token: 'mock-oauth-access-token-' + refreshCount };
+      }
+    };
+    const mockCredentialManager = {
+      hasNotebookScope: () => true,
+      getNotebookLMAccessToken: async () => {
+        const res = await mockOAuthClient.getAccessToken();
+        return res.token;
+      },
+      getYouTubeAuth: () => mockOAuthClient,
+      tokens: { youtube: { scope: 'https://www.googleapis.com/auth/notebook' } }
+    };
+
+    const oauthProvider = new NotebookLMClientProvider({ mode: 'official' }, {
+      credentialManager: mockCredentialManager
+    });
+    if (!oauthProvider.isConfigured()) {
+      throw new Error('Provider should report configured when valid OAuth credentials exist');
+    }
+    const oauthStatus = oauthProvider.getStatus();
+    if (oauthStatus.status !== 'ready' || oauthStatus.authType !== 'oauth') {
+      throw new Error('Provider status should report ready and oauth authType');
+    }
+
+    // Test dynamic token resolution and refresh
+    const token1 = await oauthProvider.getAuthToken();
+    const token2 = await oauthProvider.getAuthToken();
+    if (token1 !== 'mock-oauth-access-token-1' || token2 !== 'mock-oauth-access-token-2') {
+      throw new Error('Provider failed to dynamically acquire access tokens from CredentialManager');
+    }
+
+    // Test HTTP 401/403 error classification
+    let authErrorCaught = false;
+    oauthProvider.getAuthToken = async () => {
+      const err = new Error('Refresh token revoked');
+      err.isAuthError = true;
+      throw err;
+    };
+    try {
+      await oauthProvider.listNotebooks();
+    } catch (err) {
+      if (err.isAuthError) {
+        authErrorCaught = true;
+      }
+    }
+    if (!authErrorCaught) {
+      throw new Error('Provider did not classify authentication error correctly');
+    }
+
+    // Test agent wiring with CredentialManager
+    const oauthAgent = new NotebookLMResearchAgent(null, mockCredentialManager);
+    if (!oauthAgent.provider.credentialManager) {
+      throw new Error('NotebookLMResearchAgent failed to pass credentialManager into provider');
+    }
+
     this.logger.info('NotebookLM Research Agent suite passed successfully');
   }
 }

@@ -12,7 +12,10 @@ class NotebookLMResearchAgent {
     const resolved = credentials?.credentials || credentials || {};
     const nblmConfig = resolved.notebooklm || {};
     
-    this.provider = options.provider || new NotebookLMClientProvider(nblmConfig, { logger: this.logger });
+    this.provider = options.provider || new NotebookLMClientProvider(nblmConfig, {
+      logger: this.logger,
+      credentialManager: credentials
+    });
     this.aiTextService = options.aiTextService || new AITextService(resolved);
     this.activeNotebooks = new Map();
     this.executionHistory = [];
