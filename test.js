@@ -67,7 +67,8 @@ class SystemTest {
       { name: 'Reply Approval and Posting', test: () => this.testReplyApprovalAndPosting() },
       { name: 'Engagement AI Provider Wiring', test: () => this.testEngagementAIProviderWiring() },
       { name: 'Engagement Sync Schedule', test: () => this.testEngagementSyncSchedule() },
-      { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() }
+      { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() },
+      { name: 'NotebookLM Research Agent Suite', test: () => this.testNotebookLMAgentSuite() }
     ];
 
     let passed = 0;
@@ -3319,6 +3320,8 @@ class SystemTest {
       './agents/production-management-agent',
       './agents/publishing-scheduling-agent',
       './agents/analytics-optimization-agent',
+      './agents/notebooklm-research-agent',
+      './utils/notebooklm-client-provider',
       './utils/discoverability-service',
       './utils/discoverability-adapters/darkzseo'
     ];
@@ -3901,6 +3904,84 @@ class SystemTest {
     }
     const noService = new DailyAutomation({}, {}, {});
     await noService.refreshGrowthExperiments();
+  }
+
+  async testNotebookLMAgentSuite() {
+    const { NotebookLMResearchAgent } = require('./agents/notebooklm-research-agent');
+    const { NotebookLMClientProvider } = require('./utils/notebooklm-client-provider');
+
+    // 1. Provider configuration & mock tests
+    const mockProvider = new NotebookLMClientProvider({ enabled: true, mode: 'mock' });
+    if (!mockProvider.isConfigured()) {
+      throw new Error('Mock provider should report as configured');
+    }
+
+    const nb = await mockProvider.createNotebook('Test Notebook');
+    if (!nb.id || !nb.title) {
+      throw new Error('Notebook creation failed to return id and title');
+    }
+
+    const source = await mockProvider.addSource(nb.id, {
+      type: 'url',
+      url: 'https://example.com/research-doc'
+    });
+    if (source.status !== 'indexed' || !source.id) {
+      throw new Error('Source ingestion failed to return indexed status');
+    }
+
+    const queryResult = await mockProvider.queryNotebook(nb.id, 'Summarize core insights');
+    if (!queryResult.answer || !Array.isArray(queryResult.citations)) {
+      throw new Error('Notebook query failed to return structured answer and citations');
+    }
+
+    // 2. Disabled provider behavior
+    const disabledProvider = new NotebookLMClientProvider({ enabled: false });
+    if (disabledProvider.isConfigured()) {
+      throw new Error('Disabled provider should report unconfigured');
+    }
+    const disabledStatus = disabledProvider.getStatus();
+    if (disabledStatus.status !== 'disabled') {
+      throw new Error('Disabled provider status mismatch');
+    }
+
+    // 3. Agent registration, discovery & status
+    const agent = new NotebookLMResearchAgent({}, {}, { provider: mockProvider });
+    await agent.initialize();
+    const status = agent.getStatus();
+    if (status.id !== 'notebooklm' || status.status !== 'idle' || !status.enabled) {
+      throw new Error('NotebookLM agent status reporting failed');
+    }
+
+    // 4. Research analysis workflow
+    const testSources = [
+      { url: 'https://example.com/source1', title: 'Source 1' },
+      { url: 'https://example.com/source2', title: 'Source 2' }
+    ];
+    const researchResult = await agent.analyzeResearchTopic('Submarine Cables', testSources);
+    if (!researchResult.summary || !researchResult.notebookId || researchResult.sources.length !== 2) {
+      throw new Error('Agent analyzeResearchTopic failed to return structured bundle');
+    }
+
+    // 5. Fallback behavior when provider fails
+    const failingProvider = {
+      enabled: true,
+      isConfigured: () => true,
+      createNotebook: async () => { throw new Error('API Rate Limited 429'); }
+    };
+    const fallbackAiText = {
+      generateText: async () => 'Fallback research synthesis output'
+    };
+    const resilientAgent = new NotebookLMResearchAgent({}, {}, {
+      provider: failingProvider,
+      aiTextService: fallbackAiText
+    });
+    await resilientAgent.initialize();
+    const fallbackBundle = await resilientAgent.analyzeResearchTopic('Fallback Topic', testSources, { allowFallback: true });
+    if (!fallbackBundle.summary || fallbackBundle.provider !== 'fallback_ai_text') {
+      throw new Error('Resilient agent failed to cleanly fallback to AI text synthesis');
+    }
+
+    this.logger.info('NotebookLM Research Agent suite passed successfully');
   }
 }
 

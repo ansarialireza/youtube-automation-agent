@@ -143,6 +143,7 @@ function renderDashboard() {
   renderEngagement(ui.state.engagement || {});
   renderActivation(state.activation);
   renderReadiness(state.readiness);
+  renderAgents(state.system?.agentsStatus || {}, state.system?.agents || []);
   renderOperator(state.channelStrategy, state.operatorRuns || [], { ...state.system, readiness: state.readiness });
   populateSettings(state.profile, state.settings, state.system.videoProviders || []);
 }
@@ -234,6 +235,80 @@ function renderSchedule(schedule, selector) {
       <button class="text-button" data-open-content="${escapeHTML(item.production_id)}">View</button>
     </div>`).join('');
 }
+
+function renderAgents(agentsStatus = {}, agentsList = []) {
+  const container = $('#agents-container');
+  if (!container) return;
+
+  const agentDefinitions = [
+    { id: 'strategy', name: 'Content Strategy Agent', desc: 'Identifies trending topics, analyzes competitor signals, and maps themes to editorial pillars.' },
+    { id: 'notebooklm', name: 'NotebookLM Research Agent', desc: 'Creates research notebooks, digests web/YouTube sources, and synthesizes structured facts and insights.' },
+    { id: 'scriptWriter', name: 'Script Writer Agent', desc: 'Develops documentary hooks, narrative scene beats, and factual claim references for review.' },
+    { id: 'thumbnailDesigner', name: 'Thumbnail Designer Agent', desc: 'Creates visual thumbnail concepts and generates high-converting A/B title/thumbnail variants.' },
+    { id: 'seoOptimizer', name: 'SEO Optimizer Agent', desc: 'Generates searchable metadata, high-ranking tags, timestamps, and video descriptions.' },
+    { id: 'production', name: 'Production Management Agent', desc: 'Coordinates scene synthesis, visual generation, voice narration, and FFmpeg video assembly.' },
+    { id: 'publishing', name: 'Publishing & Scheduling Agent', desc: 'Enforces pre-publish review gates and manages authenticated uploads to the connected YouTube channel.' },
+    { id: 'analytics', name: 'Analytics & Optimization Agent', desc: 'Tracks video performance retention curves, measures learning baselines, and recommends improvements.' }
+  ];
+
+  container.innerHTML = agentDefinitions.map(def => {
+    const info = agentsStatus[def.id] || { status: 'ready', enabled: true };
+    const isNotebookLM = def.id === 'notebooklm';
+    const status = info.status || 'ready';
+    const isEnabled = info.enabled !== false && status !== 'disabled';
+
+    return `
+      <article class="panel agent-card" style="display:flex; flex-direction:column; justify-content:space-between; padding:20px; border-radius:12px; background:var(--card-bg, #1e1e24); border:1px solid var(--border-color, #2a2a32);">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:1.15rem; font-weight:600;">${escapeHTML(def.name)}</h3>
+            <span class="status ${status === 'ready' || status === 'idle' ? 'passed' : (status === 'running' ? 'active' : (status === 'disabled' ? 'unverified' : 'failed'))}" style="font-size:0.75rem; text-transform:uppercase;">
+              ${escapeHTML(status)}
+            </span>
+          </div>
+          <p style="color:var(--text-muted, #9a9aae); font-size:0.9rem; line-height:1.4; margin-bottom:16px;">
+            ${escapeHTML(def.desc)}
+          </p>
+          ${isNotebookLM ? `
+            <div style="background:rgba(255,255,255,0.04); padding:10px 14px; border-radius:8px; font-size:0.85rem; margin-bottom:16px;">
+              <div><strong>Provider Mode:</strong> ${escapeHTML(info.mode || 'Auto / Official / Mock')}</div>
+              <div style="margin-top:4px;"><strong>Active Notebooks:</strong> ${escapeHTML(info.activeNotebooksCount || 0)}</div>
+              <div style="margin-top:4px;"><strong>Executions:</strong> ${escapeHTML(info.executionCount || 0)}</div>
+            </div>
+          ` : ''}
+        </div>
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:12px; border-top:1px solid rgba(255,255,255,0.06); padding-top:12px;">
+          ${isNotebookLM ? `
+            <button class="button secondary small" id="toggle-notebooklm-btn" onclick="toggleNotebookLMAgent(${!isEnabled})">
+              ${isEnabled ? 'Disable Agent' : 'Enable Agent'}
+            </button>
+          ` : `
+            <small style="color:var(--text-muted, #7a7a8e);">Core Agent · Always Active</small>
+          `}
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+window.toggleNotebookLMAgent = async function(enable) {
+  try {
+    const res = await fetch('/api/agents/notebooklm/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: enable })
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (window.toast) window.toast(`NotebookLM Agent ${enable ? 'enabled' : 'disabled'}`);
+      if (window.refreshDashboard) window.refreshDashboard();
+    } else {
+      alert(data.error || 'Failed to toggle NotebookLM');
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+};
 
 function renderNotifications(notifications, events) {
   const items = notifications.length

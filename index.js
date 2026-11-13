@@ -13,6 +13,7 @@ const { SEOOptimizerAgent } = require('./agents/seo-optimizer-agent');
 const { ProductionManagementAgent } = require('./agents/production-management-agent');
 const { PublishingSchedulingAgent } = require('./agents/publishing-scheduling-agent');
 const { AnalyticsOptimizationAgent } = require('./agents/analytics-optimization-agent');
+const { NotebookLMResearchAgent } = require('./agents/notebooklm-research-agent');
 const { DailyAutomation } = require('./schedules/daily-automation');
 const { OperatorService } = require('./utils/operator-service');
 const { AutonomousChannelOperator } = require('./utils/autonomous-channel-operator');
@@ -166,7 +167,8 @@ class YouTubeAutomationAgent {
       seoOptimizer: new SEOOptimizerAgent(this.db, this.credentials),
       production: new ProductionManagementAgent(this.db, this.credentials),
       publishing: new PublishingSchedulingAgent(this.db, this.credentials),
-      analytics: new AnalyticsOptimizationAgent(this.db, this.credentials)
+      analytics: new AnalyticsOptimizationAgent(this.db, this.credentials),
+      notebooklm: new NotebookLMResearchAgent(this.db, this.credentials)
     };
 
     // Initialize each agent
@@ -539,6 +541,9 @@ class YouTubeAutomationAgent {
             activeJobs: this.activeJobs.size,
             automationPaused: this.scheduler ? !this.scheduler.isEnabled : true,
             agents: Object.keys(this.agents),
+            agentsStatus: Object.fromEntries(
+              Object.entries(this.agents).map(([k, a]) => [k, typeof a.getStatus === 'function' ? a.getStatus() : { id: k, status: 'ready' }])
+            ),
             autonomousRunning: Boolean(await this.db.getActiveOperatorRun()),
             videoProviders: this.agents.production?.aiVideoGenerator?.mediaGeneration?.listProviders() || []
           }
@@ -569,6 +574,43 @@ class YouTubeAutomationAgent {
     this.app.get('/api/readiness', async (_req, res) => {
       if (!this.readiness) return res.status(503).json({ error: 'Readiness service is not initialized' });
       return res.json(await this.readiness.getSummary());
+    });
+
+    this.app.get('/api/agents', async (_req, res) => {
+      const list = Object.entries(this.agents).map(([id, agent]) => {
+        if (typeof agent.getStatus === 'function') {
+          return agent.getStatus();
+        }
+        return {
+          id,
+          name: id,
+          status: 'ready',
+          enabled: true
+        };
+      });
+      return res.json({ agents: list });
+    });
+
+    this.app.post('/api/agents/notebooklm/toggle', protect, async (req, res) => {
+      const agent = this.agents.notebooklm;
+      if (!agent) return res.status(404).json({ error: 'NotebookLM agent not found' });
+      const enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : !agent.provider.enabled;
+      agent.provider.enabled = enabled;
+      agent.status = enabled ? (agent.provider.isConfigured() ? 'idle' : 'unconfigured') : 'disabled';
+      return res.json({ success: true, agent: agent.getStatus() });
+    });
+
+    this.app.post('/api/agents/notebooklm/research', protect, async (req, res) => {
+      const agent = this.agents.notebooklm;
+      if (!agent) return res.status(404).json({ error: 'NotebookLM agent not found' });
+      const { topic, sources, options } = req.body || {};
+      if (!topic) return res.status(400).json({ error: 'Topic is required' });
+      try {
+        const result = await agent.analyzeResearchTopic(topic, sources || [], options || {});
+        return res.json({ success: true, result });
+      } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
     });
 
     this.app.post('/api/readiness/run', protect, async (req, res) => {
@@ -1484,9 +1526,26 @@ class YouTubeAutomationAgent {
       generated.channelConstraints = strategyContext.constraints || null;
       generated.contentPillar = strategyContext.pillar || null;
       generated.callToAction = profile.call_to_action || null;
-      generated.researchSources = Array.isArray(strategyContext.researchSources)
+      let sources = Array.isArray(strategyContext.researchSources)
         ? strategyContext.researchSources
         : [];
+
+      // If NotebookLM research agent is enabled and active, synthesize/enrich research sources
+      if (this.agents.notebooklm && this.agents.notebooklm.getStatus().enabled && sources.length > 0) {
+        try {
+          this.logger.info(`Invoking NotebookLM Research Agent for topic: "${generated.topic}"`);
+          const nblmResult = await this.agents.notebooklm.analyzeResearchTopic(generated.topic, sources, { allowFallback: true });
+          if (nblmResult?.summary) {
+            generated.notebooklmResearch = nblmResult.summary;
+            generated.planRationale = (generated.planRationale ? generated.planRationale + '\n\n' : '') +
+              `[NotebookLM Synthesis]:\n${nblmResult.summary.slice(0, 500)}...`;
+          }
+        } catch (nbErr) {
+          this.logger.warn(`NotebookLM enrichment skipped: ${nbErr.message}`);
+        }
+      }
+
+      generated.researchSources = sources;
       return generated;
     });
     this.logger.info(`Strategy generated: ${strategy.topic}`);

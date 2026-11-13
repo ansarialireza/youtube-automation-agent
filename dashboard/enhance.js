@@ -14,7 +14,7 @@
 
   const MINI_LABELS = {
     overview: 'Home', operator: 'Operator', pipeline: 'Pipeline',
-    calendar: 'Calendar', analytics: 'Stats', readiness: 'Checks', settings: 'Setup'
+    calendar: 'Calendar', analytics: 'Stats', readiness: 'Checks', agents: 'Agents', settings: 'Setup'
   };
   function ensureMiniLabels() {
     $$('.nav-item').forEach(item => {
@@ -37,6 +37,7 @@
     calendar: ['EDITORIAL PLANNING', 'Plan before you generate.', 'Calendar'],
     analytics: ['PERFORMANCE', 'Turn results into the next move.', 'Analytics'],
     readiness: ['PRODUCTION READINESS', 'Verify before autonomy runs.', 'Readiness'],
+    agents: ['AI AGENTS', 'Ecosystem, status, and controls.', 'Agents'],
     settings: ['CHANNEL GUARDRAILS', 'Make every agent sound like you.', 'Setup']
   };
   let currentView = 'overview';
