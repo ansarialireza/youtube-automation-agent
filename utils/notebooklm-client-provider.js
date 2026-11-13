@@ -16,7 +16,7 @@ class NotebookLMClientProvider {
     this.mode = config.mode || process.env.NOTEBOOKLM_MODE || 'auto'; // 'official' | 'unofficial' | 'mock' | 'auto'
     this.apiKey = config.apiKey || process.env.NOTEBOOKLM_API_KEY || null;
     this.sessionToken = config.sessionToken || process.env.NOTEBOOKLM_SESSION_TOKEN || null;
-    this.endpoint = config.endpoint || process.env.NOTEBOOKLM_ENDPOINT || 'https://notebooklm.googleapis.com/v1';
+    this.endpoint = config.endpoint || process.env.NOTEBOOKLM_ENDPOINT || 'https://notebook.googleapis.com/v1';
     this.timeout = config.timeout || 30000;
   }
 
