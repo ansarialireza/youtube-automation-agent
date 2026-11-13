@@ -23,6 +23,7 @@ class NotebookLMClientProvider {
   isConfigured() {
     if (!this.enabled) return false;
     if (this.mode === 'mock') return true;
+    if (this.mode === 'unofficial' && this.sessionToken) return true;
     if (this.sessionToken || this.apiKey) return true;
     return false;
   }
@@ -32,7 +33,7 @@ class NotebookLMClientProvider {
       return { status: 'disabled', message: 'NotebookLM integration is disabled' };
     }
     if (!this.isConfigured()) {
-      return { status: 'unconfigured', message: 'NotebookLM credentials (API key or session token) not provided' };
+      return { status: 'unconfigured', message: 'NotebookLM credentials (OAuth token or session cookies) not provided' };
     }
     return { status: 'ready', mode: this.mode, endpoint: this.endpoint };
   }

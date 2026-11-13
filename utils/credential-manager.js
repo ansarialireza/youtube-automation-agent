@@ -114,7 +114,8 @@ class CredentialManager {
       'https://www.googleapis.com/auth/youtube',
       'https://www.googleapis.com/auth/youtube.readonly',
       'https://www.googleapis.com/auth/yt-analytics.readonly',
-      'https://www.googleapis.com/auth/youtube.force-ssl'
+      'https://www.googleapis.com/auth/youtube.force-ssl',
+      'https://www.googleapis.com/auth/notebook'
     ];
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -156,6 +157,33 @@ class CredentialManager {
 
     oauth2Client.setCredentials(this.tokens.youtube);
     return oauth2Client;
+  }
+
+  getNotebookLMAuthUrl() {
+    if (!this.credentials.youtube) {
+      throw new Error('Google OAuth credentials not configured in credentials.json');
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      this.credentials.youtube.client_id,
+      this.credentials.youtube.client_secret,
+      this.credentials.youtube.redirect_uris[0]
+    );
+
+    const scopes = [
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube',
+      'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/yt-analytics.readonly',
+      'https://www.googleapis.com/auth/youtube.force-ssl',
+      'https://www.googleapis.com/auth/notebook'
+    ];
+
+    return oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: scopes,
+      prompt: 'consent'
+    });
   }
 
   getYouTubeClient() {
