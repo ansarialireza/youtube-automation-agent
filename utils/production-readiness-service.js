@@ -154,7 +154,7 @@ class ProductionReadinessService {
       return { status: 'skipped', message: 'Provider is configured; the paid live image probe was not requested.', remediation: 'Enable “Include paid image probe” on the next readiness run to verify image generation.' };
     }
     const outputPath = path.join(tempDir, 'readiness-image.png');
-    await generator.generateImage('Simple red circle centered on a plain dark background, no text', outputPath);
+    await generator.generateImage('A glowing geometric blue cube centered on a dark studio background, 3d render, professional lighting', outputPath);
     const stats = await fs.stat(outputPath);
     if (stats.size < 100) throw new Error('Image provider returned an empty or invalid asset');
     return { message: 'Image provider created a real test asset.', details: { bytes: stats.size } };

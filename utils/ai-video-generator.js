@@ -60,6 +60,8 @@ function describeImageProviderError(provider, model, error) {
       fix = 'Cloudflare Workers AI access was denied or requires a Workers Paid plan for this model.';
     } else if (status === 429 || /rate limit|out of capacity|3040/i.test(text)) {
       fix = 'Cloudflare Workers AI rate-limited this request or exceeded daily free Neurons. Wait or upgrade to Workers Paid.';
+    } else if (status === 400 && (/NSFW/i.test(text) || /8007/.test(text))) {
+      fix = 'the prompt triggered Cloudflare Workers AI safety/NSFW filter (error 8007). Use neutral, descriptive prompts.';
     }
   }
 
@@ -395,17 +397,31 @@ class AIVideoGenerator {
 
   async generateCloudflareImage(prompt, imagePath) {
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${this.cloudflareAccountId}/ai/run/${this.cloudflareImageModel}`;
-    const response = await axios.post(
-      endpoint,
-      { prompt },
-      {
-        headers: {
-          Authorization: `Bearer ${this.cloudflareApiToken}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 60000
+    let response;
+    try {
+      response = await axios.post(
+        endpoint,
+        { prompt },
+        {
+          headers: {
+            Authorization: `Bearer ${this.cloudflareApiToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 60000
+        }
+      );
+    } catch (err) {
+      if (err.response) {
+        err.status = err.response.status;
+        const cfErrors = err.response.data?.errors;
+        if (Array.isArray(cfErrors) && cfErrors.length > 0) {
+          const firstErr = cfErrors[0];
+          err.code = firstErr.code || err.code;
+          err.message = `${err.message}: ${firstErr.message || JSON.stringify(firstErr)}`;
+        }
       }
-    );
+      throw err;
+    }
 
     const base64Data = response.data?.result?.image;
     if (!base64Data) {
