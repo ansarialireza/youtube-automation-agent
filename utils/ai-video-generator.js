@@ -53,6 +53,14 @@ function describeImageProviderError(provider, model, error) {
     } else if (status === 429) {
       fix = 'OpenAI rate-limited this key. Wait a minute and retry.';
     }
+  } else if (provider === 'Cloudflare Workers AI') {
+    if (status === 401 || /unauthorized|authentication error/i.test(text)) {
+      fix = 'the Cloudflare API token was rejected. Ensure the token has Workers AI Read permissions.';
+    } else if (status === 403 || /forbidden|5035/i.test(text)) {
+      fix = 'Cloudflare Workers AI access was denied or requires a Workers Paid plan for this model.';
+    } else if (status === 429 || /rate limit|out of capacity|3040/i.test(text)) {
+      fix = 'Cloudflare Workers AI rate-limited this request or exceeded daily free Neurons. Wait or upgrade to Workers Paid.';
+    }
   }
 
   const label = [status, code && code !== String(status) ? code : null].filter(Boolean).join(' ');
@@ -104,6 +112,14 @@ class AIVideoGenerator {
     this.elevenLabsApiKey = resolvedCredentials.elevenLabs?.apiKey || process.env.ELEVENLABS_API_KEY;
     this.elevenLabsVoiceId = resolvedCredentials.elevenLabs?.voiceId || process.env.ELEVENLABS_VOICE_ID;
     this.elevenLabsModel = process.env.ELEVENLABS_TTS_MODEL || 'eleven_v3';
+
+    // Cloudflare Workers AI configuration
+    this.cloudflareApiToken = resolvedCredentials.cloudflare?.apiToken || process.env.CLOUDFLARE_API_TOKEN;
+    this.cloudflareAccountId = resolvedCredentials.cloudflare?.accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
+    this.cloudflareImageModel = resolvedCredentials.cloudflare?.imageModel || process.env.CLOUDFLARE_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
+    if (this.cloudflareApiToken && this.cloudflareAccountId) {
+      this.logger.info(`Cloudflare Workers AI image service initialized (model: ${this.cloudflareImageModel})`);
+    }
     
     // Azure Speech configuration
     this.azureSpeechKey = resolvedCredentials.azure?.speechKey || process.env.AZURE_SPEECH_KEY;
@@ -274,11 +290,18 @@ class AIVideoGenerator {
     await fs.mkdir(path.dirname(imagePath), { recursive: true });
 
     const providers = [];
-    if (this.openai) {
-      providers.push({ name: 'OpenAI', model: OPENAI_IMAGE_MODEL, run: () => this.generateOpenAIImage(prompt, imagePath) });
+    if (this.cloudflareApiToken && this.cloudflareAccountId) {
+      providers.push({
+        name: 'Cloudflare Workers AI',
+        model: this.cloudflareImageModel,
+        run: () => this.generateCloudflareImage(prompt, imagePath)
+      });
     }
     if (this.gemini) {
       providers.push({ name: 'Gemini', model: this.geminiImageModel(), run: () => this.generateGeminiImage(prompt, imagePath) });
+    }
+    if (this.openai) {
+      providers.push({ name: 'OpenAI', model: OPENAI_IMAGE_MODEL, run: () => this.generateOpenAIImage(prompt, imagePath) });
     }
     if (!providers.length) {
       throw new Error('No image generation provider configured');
@@ -356,6 +379,43 @@ class AIVideoGenerator {
     const metadata = await sharp(imageBuffer, { failOn: 'error' }).metadata();
     if (!metadata.width || !metadata.height) {
       throw new Error('Gemini image generation returned an invalid image asset');
+    }
+
+    const extension = path.extname(imagePath).toLowerCase();
+    const output = sharp(imageBuffer, { failOn: 'error' });
+    if (extension === '.jpg' || extension === '.jpeg') {
+      await output.jpeg({ quality: 92 }).toFile(imagePath);
+    } else if (extension === '.webp') {
+      await output.webp({ quality: 92 }).toFile(imagePath);
+    } else {
+      await output.png().toFile(imagePath);
+    }
+    return imagePath;
+  }
+
+  async generateCloudflareImage(prompt, imagePath) {
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${this.cloudflareAccountId}/ai/run/${this.cloudflareImageModel}`;
+    const response = await axios.post(
+      endpoint,
+      { prompt },
+      {
+        headers: {
+          Authorization: `Bearer ${this.cloudflareApiToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000
+      }
+    );
+
+    const base64Data = response.data?.result?.image;
+    if (!base64Data) {
+      throw new Error('Cloudflare Workers AI image generation returned no image data');
+    }
+
+    const imageBuffer = Buffer.from(base64Data, 'base64');
+    const metadata = await sharp(imageBuffer, { failOn: 'error' }).metadata();
+    if (!metadata.width || !metadata.height) {
+      throw new Error('Cloudflare Workers AI returned an invalid image asset');
     }
 
     const extension = path.extname(imagePath).toLowerCase();
@@ -998,7 +1058,7 @@ class AIVideoGenerator {
     this.logger.info('Generating custom thumbnail...');
 
     try {
-      if (!this.openai && !this.gemini) {
+      if (!this.openai && !this.gemini && !(this.cloudflareApiToken && this.cloudflareAccountId)) {
         return await this.simulateThumbnailGeneration(script, style);
       }
 
