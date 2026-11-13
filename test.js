@@ -2082,25 +2082,43 @@ class SystemTest {
       }
 
       // #65: a failing image provider falls through to the next configured one.
-      const generator = new AIVideoGenerator({ openai: { apiKey: 'test-key' }, gemini: { apiKey: 'test-key' } });
-      let openAIAttempts = 0;
-      generator.openai.images.generate = async () => {
-        openAIAttempts++;
-        throw Object.assign(new Error('401 Incorrect API key provided'), { status: 401 });
-      };
-      const image = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#224488' } }).png().toBuffer();
-      generator.gemini.models.generateContent = async () => ({
-        candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: image.toString('base64') } }] } }]
+      // WEIRWISE Provider Priority: Cloudflare Workers AI -> Gemini -> OpenAI
+      const generator = new AIVideoGenerator({
+        cloudflare: { apiToken: 'test-token', accountId: 'test-account' },
+        gemini: { apiKey: 'test-key' },
+        openai: { apiKey: 'test-key' }
       });
+      let cloudflareAttempts = 0;
+      generator.generateCloudflareImage = async () => {
+        cloudflareAttempts++;
+        throw Object.assign(new Error('429 Rate limited'), { status: 429 });
+      };
+      let geminiAttempts = 0;
+      generator.gemini.models.generateContent = async () => {
+        geminiAttempts++;
+        throw quotaError;
+      };
+      let openAIAttempts = 0;
+      const image = await sharp({ create: { width: 320, height: 180, channels: 3, background: '#224488' } }).png().toBuffer();
+      generator.generateOpenAIImage = async (_prompt, destPath) => {
+        openAIAttempts++;
+        await fs.writeFile(destPath, image);
+        return destPath;
+      };
+
       const imagePath = path.join(directory, 'fallback.png');
       await generator.generateImage('A blue test image', imagePath);
-      if (openAIAttempts !== 1 || (await sharp(imagePath).metadata()).width !== 320) {
-        throw new Error('A failed OpenAI image request did not fall back to Gemini');
+      if (cloudflareAttempts !== 1 || geminiAttempts !== 1 || openAIAttempts !== 1 || (await sharp(imagePath).metadata()).width !== 320) {
+        throw new Error('Image provider priority fallback sequence (Cloudflare -> Gemini -> OpenAI) failed');
       }
-      generator.gemini.models.generateContent = async () => { throw quotaError; };
+
+      // When every configured provider fails, verify each provider failure is reported
+      generator.generateOpenAIImage = async () => {
+        throw Object.assign(new Error('401 Incorrect API key provided'), { status: 401 });
+      };
       let combined = '';
       try { await generator.generateImage('A blue test image', path.join(directory, 'none.png')); } catch (error) { combined = error.message; }
-      if (!/OpenAI image generation/.test(combined) || !/Gemini image generation/.test(combined) || !/rejected/.test(combined)) {
+      if (!/Cloudflare Workers AI image generation/.test(combined) || !/Gemini image generation/.test(combined) || !/OpenAI image generation/.test(combined) || !/rejected/.test(combined)) {
         throw new Error('When every image provider fails, each provider failure and fix must be reported');
       }
 
